@@ -4,3 +4,4 @@ dist/
 .env
 coverage/
 *.tsbuildinfo
+apps/api/src/generated/

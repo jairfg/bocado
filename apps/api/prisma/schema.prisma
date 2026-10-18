@@ -1,0 +1,56 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Food {
+  id            Int    @id @default(autoincrement())
+  sourceKey     String @unique @map("source_key")
+  sourceDataset String @map("source_dataset")
+  dataSource    String @map("data_source")
+  name          String
+  category      String
+  servingSizeG  Float? @map("serving_size_g")
+
+  kcalPer100g     Float @map("kcal_per_100g")
+  proteinGPer100g Float @map("protein_g_per_100g")
+  carbsGPer100g   Float @map("carbs_g_per_100g")
+  fatGPer100g     Float @map("fat_g_per_100g")
+
+  fiberGPer100g        Float? @map("fiber_g_per_100g")
+  sugarGPer100g        Float? @map("sugar_g_per_100g")
+  sodiumMgPer100g      Float? @map("sodium_mg_per_100g")
+  saturatedFatGPer100g Float? @map("saturated_fat_g_per_100g")
+
+  // Resto de vitaminas, minerales y grasas con las claves del dataset;
+  // null = el dataset no reporta ese valor.
+  micros Json
+
+  // null = desconocido
+  isVegetarian Boolean? @map("is_vegetarian")
+  hasLactose   Boolean? @map("has_lactose")
+  hasGluten    Boolean? @map("has_gluten")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  measures FoodMeasure[]
+
+  @@map("foods")
+}
+
+model FoodMeasure {
+  id     Int    @id @default(autoincrement())
+  foodId Int    @map("food_id")
+  name   String
+  grams  Float
+  food   Food   @relation(fields: [foodId], references: [id], onDelete: Cascade)
+
+  @@index([foodId])
+  @@map("food_measures")
+}

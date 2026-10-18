@@ -21,6 +21,10 @@ jobs:
       # La API y el lint type-aware importan @bocado/shared desde dist/
       - run: npm run build:shared
 
+      # El cliente de Prisma no se versiona: se genera desde schema.prisma
+      - name: Generate Prisma client
+        run: npm run db:generate -w api
+
       - run: npm run lint
 
       - run: npm test
