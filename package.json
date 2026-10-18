@@ -1,0 +1,16 @@
+{
+  "name": "bocado",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run start:dev -w api",
+    "dev:web": "npm run dev -w web",
+    "dev:shared": "npm run dev -w @bocado/shared",
+    "build:shared": "npm run build -w @bocado/shared",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  }
+}
