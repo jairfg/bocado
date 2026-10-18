@@ -36,6 +36,9 @@ model Food {
   hasLactose   Boolean? @map("has_lactose")
   hasGluten    Boolean? @map("has_gluten")
 
+  // Se excluyen por defecto de búsquedas y menús
+  isAlcoholic Boolean @default(false) @map("is_alcoholic")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

@@ -8,6 +8,8 @@ export const FoodQuerySchema = z.object({
   maxKcal: z.coerce.number().nonnegative().optional(),
   minProtein: z.coerce.number().nonnegative().optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  // stringbool y no coerce.boolean: Boolean('false') es true.
+  includeAlcoholic: z.stringbool().default(false),
 });
 
 export type FoodQuery = z.infer<typeof FoodQuerySchema>;

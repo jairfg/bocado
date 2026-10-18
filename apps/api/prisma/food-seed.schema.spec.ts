@@ -1,4 +1,8 @@
-import { checkAtwater, FoodSeedSchema } from './food-seed.schema.js';
+import {
+  checkAtwater,
+  FoodSeedSchema,
+  isAlcoholic,
+} from './food-seed.schema.js';
 
 // Basado en "Fruta deshidratada en trozos" (FDC 167540) de usda.yml
 function buildFood(overrides: Record<string, unknown> = {}) {
@@ -108,5 +112,54 @@ describe('checkAtwater', () => {
     });
 
     expect(check.consistent).toBe(true);
+  });
+
+  it('no advierte por diferencias pequeñas en alimentos casi sin calorías', () => {
+    // Café colado (FDC 171890): 0.12×4 + 0×4 + 0.02×9 = 0.66 kcal calculadas
+    // frente a 1 declarada. Es +52 %, pero solo 0.34 kcal de diferencia.
+    const check = checkAtwater({
+      kcalPer100g: 1,
+      proteinGPer100g: 0.12,
+      carbsGPer100g: 0,
+      fatGPer100g: 0.02,
+    });
+
+    expect(check.deviation).toBeGreaterThan(0.15);
+    expect(check.consistent).toBe(true);
+  });
+
+  it('advierte si las calculadas son 0 y las declaradas superan 20 kcal', () => {
+    // Licor destilado (FDC 174815): las kcal vienen del alcohol (7 kcal/g)
+    const check = checkAtwater({
+      kcalPer100g: 231,
+      proteinGPer100g: 0,
+      carbsGPer100g: 0,
+      fatGPer100g: 0,
+    });
+
+    expect(check.deviation).toBeNull();
+    expect(check.consistent).toBe(false);
+  });
+});
+
+describe('isAlcoholic', () => {
+  it.each([
+    ['Vino tinto de mesa', true],
+    ['Cerveza light, promedio de todas las marcas', true],
+    [
+      'Licor destilado (ginebra, ron, vodka o whisky), 80 proof (40% alc.)',
+      true,
+    ],
+    ['Vino sin alcohol', false],
+    ['Bebida de malta (incluye cerveza sin alcohol)', false],
+    ['Refresco de cola, regular', false],
+  ])('%s → %s', (name, expected) => {
+    expect(isAlcoholic({ name, category: 'beverages' })).toBe(expected);
+  });
+
+  it('solo marca bebidas', () => {
+    expect(
+      isAlcoholic({ name: 'Vinagre de vino tinto', category: 'miscellaneous' }),
+    ).toBe(false);
   });
 });

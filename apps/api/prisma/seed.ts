@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { parse } from 'yaml';
 import { PrismaClient } from '../src/generated/prisma/client.js';
-import { checkAtwater, FoodSeedSchema } from './food-seed.schema.js';
+import {
+  checkAtwater,
+  FoodSeedSchema,
+  isAlcoholic,
+} from './food-seed.schema.js';
 
 const DATA_FILE = new URL('../../../data/foods/usda.yml', import.meta.url);
 
@@ -46,6 +50,7 @@ async function main(): Promise<void> {
 
   const rejected: Rejected[] = [];
   const warnings: Warning[] = [];
+  const alcoholic: string[] = [];
   let imported = 0;
 
   for (const [index, item] of data.entries()) {
@@ -60,7 +65,11 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const { measures, ...food } = result.data;
+    const { measures, ...data } = result.data;
+    const food = { ...data, isAlcoholic: isAlcoholic(data) };
+    if (food.isAlcoholic) {
+      alcoholic.push(`${food.name} (FDC ${food.sourceKey})`);
+    }
 
     const atwater = checkAtwater(food);
     if (!atwater.consistent) {
@@ -100,10 +109,16 @@ async function main(): Promise<void> {
     }
   }
 
+  console.log(`\nMarcados como alcohólicos (${alcoholic.length}):`);
+  for (const name of alcoholic) {
+    console.log(`  - ${name}`);
+  }
+
   console.log('\nResumen');
   console.log(`  Importados:   ${imported}`);
   console.log(`  Rechazados:   ${rejected.length}`);
   console.log(`  Advertencias: ${warnings.length}`);
+  console.log(`  Alcohólicos:  ${alcoholic.length}`);
 }
 
 try {

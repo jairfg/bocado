@@ -88,6 +88,10 @@ export const FoodSeedSchema = z
 export type FoodSeed = z.output<typeof FoodSeedSchema>;
 
 export const ATWATER_TOLERANCE = 0.15;
+// En alimentos casi sin calorías el porcentaje se dispara por décimas
+// (café: 1 kcal declarada frente a 0.7 calculada es +52 %), así que además
+// se exige una diferencia absoluta mínima.
+export const ATWATER_MIN_KCAL_DIFF = 20;
 
 export type AtwaterCheck = {
   consistent: boolean;
@@ -105,19 +109,38 @@ export function checkAtwater(
 ): AtwaterCheck {
   const expectedKcal =
     food.proteinGPer100g * 4 + food.carbsGPer100g * 4 + food.fatGPer100g * 9;
+  const absoluteDiff = Math.abs(food.kcalPer100g - expectedKcal);
 
-  if (expectedKcal === 0) {
-    return {
-      consistent: food.kcalPer100g === 0,
-      expectedKcal,
-      deviation: null,
-    };
-  }
+  // Con 0 kcal calculadas el desvío relativo es infinito: solo cuenta
+  // la diferencia absoluta.
+  const deviation =
+    expectedKcal === 0
+      ? null
+      : (food.kcalPer100g - expectedKcal) / expectedKcal;
+  const exceedsTolerance =
+    deviation === null || Math.abs(deviation) > ATWATER_TOLERANCE;
 
-  const deviation = (food.kcalPer100g - expectedKcal) / expectedKcal;
   return {
-    consistent: Math.abs(deviation) <= ATWATER_TOLERANCE,
+    consistent: !(exceedsTolerance && absoluteDiff > ATWATER_MIN_KCAL_DIFF),
     expectedKcal,
     deviation,
   };
+}
+
+// El dataset no trae el contenido de alcohol, así que se detecta por nombre,
+// solo dentro de bebidas (fuera de ahí "vino" aparece en "vinagre de vino").
+const ALCOHOLIC_NAME =
+  /\b(cerveza|vino|licor|ron|whisky|vodka|ginebra|tequila|mezcal|pisco|sake|brandy|conac|jerez|vermut|champana|sidra|aguardiente)\b/;
+const NON_ALCOHOLIC_NAME = /\bsin alcohol\b/;
+
+const normalize = (text: string): string =>
+  text
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+
+export function isAlcoholic(food: { name: string; category: string }): boolean {
+  if (food.category !== 'beverages') return false;
+  const name = normalize(food.name);
+  return ALCOHOLIC_NAME.test(name) && !NON_ALCOHOLIC_NAME.test(name);
 }
