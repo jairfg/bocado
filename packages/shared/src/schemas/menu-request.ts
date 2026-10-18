@@ -27,7 +27,12 @@ export const MenuRequestSchema = z.object({
         Math.abs(proteinPct + carbsPct + fatPct - 100) < MACROS_SUM_TOLERANCE,
       { error: 'proteinPct + carbsPct + fatPct deben sumar 100' },
     ),
-  meals: z.array(MealSlotSchema).min(1),
+  meals: z
+    .array(MealSlotSchema)
+    .min(1)
+    .refine((meals) => new Set(meals).size === meals.length, {
+      error: 'meals no puede tener comidas repetidas',
+    }),
   restrictions: z.string().max(500).optional(),
 });
 
