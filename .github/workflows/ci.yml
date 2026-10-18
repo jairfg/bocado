@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # La API y el lint type-aware importan @bocado/shared desde dist/
+      - run: npm run build:shared
+
+      - run: npm run lint
+
+      - run: npm test
+
+      - name: Build API
+        run: npm run build -w api
+
+      - name: Build web
+        run: npm run build -w web
