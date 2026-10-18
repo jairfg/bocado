@@ -4,6 +4,8 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   DATABASE_URL: z.url(),
   REDIS_URL: z.url(),
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1),
+  LLM_MODEL: z.string().min(1),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

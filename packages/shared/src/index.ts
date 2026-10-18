@@ -17,3 +17,16 @@ export {
   type MealTarget,
   type MenuDistribution,
 } from './schemas/menu-distribution.js';
+export { LlmMenuSchema, type LlmMenu } from './schemas/llm-menu.js';
+export {
+  MenuDraftItemSchema,
+  MenuDraftMealSchema,
+  MenuDraftSchema,
+  MenuDraftWarningSchema,
+  NutrientsSchema,
+  type MenuDraft,
+  type MenuDraftItem,
+  type MenuDraftMeal,
+  type MenuDraftWarning,
+  type Nutrients,
+} from './schemas/menu-draft.js';

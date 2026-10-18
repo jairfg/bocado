@@ -1,5 +1,6 @@
 import { FoodCategorySchema, MeasureNameSchema } from '@bocado/shared';
 import { z } from 'zod';
+import { normalizeText } from '../src/common/normalize-text.js';
 
 // Nutrientes que van al JSON `micros`, con la clave del dataset.
 // vitamin_a_re_* e ins_folic_acid_* no se importan: el esquema los descarta.
@@ -133,14 +134,8 @@ const ALCOHOLIC_NAME =
   /\b(cerveza|vino|licor|ron|whisky|vodka|ginebra|tequila|mezcal|pisco|sake|brandy|conac|jerez|vermut|champana|sidra|aguardiente)\b/;
 const NON_ALCOHOLIC_NAME = /\bsin alcohol\b/;
 
-const normalize = (text: string): string =>
-  text
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase();
-
 export function isAlcoholic(food: { name: string; category: string }): boolean {
   if (food.category !== 'beverages') return false;
-  const name = normalize(food.name);
+  const name = normalizeText(food.name);
   return ALCOHOLIC_NAME.test(name) && !NON_ALCOHOLIC_NAME.test(name);
 }
