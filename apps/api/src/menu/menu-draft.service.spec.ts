@@ -219,7 +219,7 @@ describe('MenuDraftService.generate', () => {
     expect(events[4]).toMatchObject({
       stage: 'revising_meal',
       slot: 'desayuno',
-      message: 'Corrigiendo el desayuno',
+      message: 'Revisando el desayuno',
     });
   });
 

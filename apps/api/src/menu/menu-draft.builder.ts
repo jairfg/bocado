@@ -9,6 +9,7 @@ import type {
   RestrictionFilters,
 } from '@bocado/shared';
 import type { CandidateFood } from './candidate-selection.js';
+import { mealName } from './draft-progress.js';
 import { optimizeMeal, type PlannedMeal } from './meal-evaluation.js';
 import { sumNutrients } from './nutrition.js';
 
@@ -37,7 +38,7 @@ export function planMeals({ distribution, candidates, llmMenu }: PlanInput): {
       warnings.push({
         code: 'unrequested_meal',
         slot,
-        message: `El modelo agregó ${slot}, que no se pidió; se descartó`,
+        message: `El modelo agregó ${mealName(slot)}, que no se pidió; se descartó`,
       });
       continue;
     }
@@ -46,7 +47,7 @@ export function planMeals({ distribution, candidates, llmMenu }: PlanInput): {
       warnings.push({
         code: 'duplicate_meal',
         slot,
-        message: `El modelo devolvió ${slot} más de una vez; se unieron sus alimentos`,
+        message: `El modelo devolvió ${mealName(slot)} más de una vez; se unieron sus alimentos`,
       });
     }
     itemsBySlot.set(slot, [...(previous ?? []), ...items]);
@@ -58,7 +59,7 @@ export function planMeals({ distribution, candidates, llmMenu }: PlanInput): {
       warnings.push({
         code: 'missing_meal',
         slot: meal.slot,
-        message: `El modelo no devolvió ${meal.slot}`,
+        message: `El modelo no devolvió ${mealName(meal.slot)}`,
       });
     }
 
@@ -70,7 +71,7 @@ export function planMeals({ distribution, candidates, llmMenu }: PlanInput): {
           code: 'unknown_food',
           slot: meal.slot,
           foodId,
-          message: `El foodId ${foodId} de ${meal.slot} no está entre los candidatos; se descartó`,
+          message: `Se descartó el foodId ${foodId} en ${mealName(meal.slot)}: no está entre los candidatos`,
         });
         continue;
       }
@@ -128,7 +129,7 @@ export function buildMenuDraft({
         code: 'portion_at_max' as const,
         slot: meal.slot,
         foodId: item.foodId,
-        message: `${item.name} quedó en su porción máxima (${item.maxG} g) en ${meal.slot}`,
+        message: `${item.name} quedó en su porción máxima (${item.maxG} g) en ${mealName(meal.slot)}`,
       })),
   );
 

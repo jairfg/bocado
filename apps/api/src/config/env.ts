@@ -9,6 +9,8 @@ const EnvSchema = z
     PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     DATABASE_URL: z.url(),
     REDIS_URL: z.url(),
+    // Único origen al que CORS deja llamar a la API (la web)
+    WEB_ORIGIN: optional(z.url().default('http://localhost:3000')),
     // "mock": respuestas deterministas sin red, para desarrollo local y
     // para el frontend sin gastar cuota
     LLM_PROVIDER: optional(z.enum(['google', 'mock']).default('google')),

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { MenuDraftSchema } from './menu-draft.js';
-import { MealSlotSchema } from './menu-request.js';
+import { MealSlotSchema, MenuRequestSchema } from './menu-request.js';
 
 // Etapas del armado de un menú. Cada evento trae un mensaje corto en
 // español para mostrar tal cual en la interfaz.
@@ -60,6 +60,9 @@ export type DraftCreated = z.infer<typeof DraftCreatedSchema>;
 export const MenuDraftJobSchema = z.object({
   id: z.uuid(),
   status: DraftStatusSchema,
+  // Lo que se pidió: la web lo usa para "Generar otro menú" con los mismos
+  // valores, también desde un enlace compartido
+  request: MenuRequestSchema,
   // Última etapa reportada; null si el worker aún no empezó
   progress: DraftProgressSchema.nullable(),
   result: MenuDraftSchema.nullable(),

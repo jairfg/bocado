@@ -15,6 +15,7 @@ import {
 } from '../llm/llm.service.js';
 import type { CandidateFood } from './candidate-selection.js';
 import { CandidatesService } from './candidates.service.js';
+import { capitalizedMealName, mealName } from './draft-progress.js';
 import type { LlmCallBudget } from './llm-call-budget.js';
 import { optimizeMeal, type PlannedMeal } from './meal-evaluation.js';
 import {
@@ -118,7 +119,7 @@ export class MealRevisionService {
         tally.warnings.push({
           code: 'revision_failed',
           slot: meal.slot,
-          message: `La revisión de ${meal.slot} falló (${outcome.failure.message}); se usa el mejor resultado`,
+          message: `La revisión falló en ${mealName(meal.slot)} (${outcome.failure.message}); se usa el mejor resultado`,
         });
         break;
       }
@@ -128,7 +129,7 @@ export class MealRevisionService {
       tally.warnings.push({
         code: 'revision_exhausted',
         slot: meal.slot,
-        message: `${meal.slot} sigue fuera de tolerancia: ${stopReason}. Se usa el mejor resultado`,
+        message: `${capitalizedMealName(meal.slot)} sigue fuera de tolerancia: ${stopReason}. Se usa el mejor resultado`,
       });
     }
     return { ...best, revisions };
@@ -238,7 +239,7 @@ export class MealRevisionService {
           code: 'unknown_food',
           slot: meal.slot,
           foodId,
-          message: `La revisión de ${meal.slot} propuso el foodId ${foodId}, que no existe o no cumple las restricciones; se descartó`,
+          message: `En ${mealName(meal.slot)}, la revisión propuso el foodId ${foodId}, que no existe o no cumple las restricciones; se descartó`,
         });
       }
     }

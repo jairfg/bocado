@@ -4,13 +4,20 @@ import type { DraftProgress, MealSlot } from '@bocado/shared';
 
 export type ProgressCallback = (event: DraftProgress) => void;
 
-const MEAL_NAMES: Record<MealSlot, string> = {
+// "el almuerzo": para mensajes que se muestran tal cual en la interfaz
+export const MEAL_NAMES: Record<MealSlot, string> = {
   desayuno: 'el desayuno',
   media_manana: 'la media mañana',
   almuerzo: 'el almuerzo',
   merienda: 'la merienda',
   cena: 'la cena',
 };
+
+export const mealName = (slot: MealSlot): string => MEAL_NAMES[slot];
+
+// "El almuerzo", al inicio de una oración
+export const capitalizedMealName = (slot: MealSlot): string =>
+  MEAL_NAMES[slot][0].toUpperCase() + MEAL_NAMES[slot].slice(1);
 
 export const progress = {
   interpretingRestrictions: (): DraftProgress => ({
@@ -32,7 +39,7 @@ export const progress = {
   revisingMeal: (slot: MealSlot): DraftProgress => ({
     stage: 'revising_meal',
     slot,
-    message: `Corrigiendo ${MEAL_NAMES[slot]}`,
+    message: `Revisando ${MEAL_NAMES[slot]}`,
   }),
   waitingForQuota: (seconds: number): DraftProgress => ({
     stage: 'waiting_for_quota',

@@ -45,6 +45,7 @@ function toDraftJob(
   return {
     id: job.id!,
     status,
+    request: job.data,
     progress: progress.success ? progress.data : null,
     result: status === 'completed' ? job.returnvalue : null,
     error: status === 'failed' ? failureFromReason(job.failedReason) : null,

@@ -1,26 +1,79 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
+/* Colores con nombre de su función, no de su tono: el modo oscuro solo
+   cambia los valores. Verde, ámbar y rojo quedan reservados para estados. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --background: #f5f7fa;
+  --surface: #ffffff;
+  --surface-muted: #f0f3f7;
+  --border: #e2e7ee;
+  --foreground: #0f172a;
+  --muted: #566173;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: #eaf1fe;
+  --primary-foreground: #ffffff;
+  --ok: #15803d;
+  --ok-soft: #e9f8ef;
+  --warn: #b45309;
+  --warn-soft: #fdf4e3;
+  --bad: #b91c1c;
+  --bad-soft: #fdeeee;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0b1018;
+    --surface: #131a26;
+    --surface-muted: #1a2332;
+    --border: #273246;
+    --foreground: #e7ebf2;
+    --muted: #9ba6b8;
+    --primary: #6ea0ff;
+    --primary-hover: #8fb5ff;
+    --primary-soft: #16233d;
+    --primary-foreground: #0b1018;
+    --ok: #4ade80;
+    --ok-soft: #0f2a1b;
+    --warn: #fbbf24;
+    --warn-soft: #2d2208;
+    --bad: #f87171;
+    --bad-soft: #2f1213;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --font-sans: var(--font-geist-sans);
+}
+
+html {
+  color-scheme: light dark;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Foco siempre visible al navegar con teclado */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
