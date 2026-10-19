@@ -6,6 +6,7 @@ const EnvSchema = z.object({
   REDIS_URL: z.url(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1),
   LLM_MODEL: z.string().min(1),
+  EMBEDDING_MODEL: z.string().min(1),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

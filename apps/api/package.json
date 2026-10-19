@@ -13,14 +13,16 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "lint": "oxlint --type-aware src/ test/ prisma/ prisma.config.ts",
+    "lint": "oxlint --type-aware src/ test/ prisma/ scripts/ prisma.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "db:generate": "prisma generate",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "db:embed": "tsx scripts/embed-foods.ts",
+    "eval:search": "tsx scripts/eval-search.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.99",

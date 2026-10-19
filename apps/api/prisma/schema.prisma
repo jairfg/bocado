@@ -39,11 +39,22 @@ model Food {
   // Se excluyen por defecto de búsquedas y menús
   isAlcoholic Boolean @default(false) @map("is_alcoholic")
 
+  // Búsqueda semántica (scripts/embed-foods.ts). 768 = EMBEDDING_DIMENSIONS.
+  // Prisma no maneja vector: se lee y escribe con SQL.
+  embedding         Unsupported("vector(768)")?
+  // Modelo y hash del texto embebido: si cambian, hay que volver a embeber
+  embeddingModel    String?                     @map("embedding_model")
+  embeddingTextHash String?                     @map("embedding_text_hash")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   measures FoodMeasure[]
 
+  // Prisma no soporta índices HNSW: se crea con SQL en la migración
+  // add_food_embeddings. Se declara aquí sin tipo solo para que Prisma
+  // lo conozca y no genere un DROP INDEX en la próxima migración.
+  @@index([embedding], map: "foods_embedding_hnsw_idx")
   @@map("foods")
 }
 

@@ -1,120 +1,167 @@
-import { createHash } from 'node:crypto';
-import type { FoodCategory, MenuRequest } from '@bocado/shared';
-import { normalizeText } from '../common/normalize-text.js';
+import type { FoodCategory, MealSlot } from '@bocado/shared';
 
 export type CandidateFood = {
   id: number;
   name: string;
   category: string;
-  isAlcoholic: boolean;
   kcalPer100g: number;
   proteinGPer100g: number;
   carbsGPer100g: number;
   fatGPer100g: number;
 };
 
-// No sirven para armar comidas:
-// - miscellaneous: especias, hierbas secas, sal, vinagres y salsas.
-// - beverages: refrescos, jugos, café, té, bebidas en polvo y suplementos
-//   (proteína whey o de soya en polvo, batidos sustitutos de comida).
-// - sugars_sweets: azúcar, caramelos, jarabes, mermeladas y helados.
-export const EXCLUDED_CATEGORIES = [
-  'miscellaneous',
-  'beverages',
-  'sugars_sweets',
-] as const satisfies readonly FoodCategory[];
+// Unos 60 en total: se reparten entre las comidas pedidas.
+export const MAX_CANDIDATES = 60;
 
-type MealCategory = Exclude<FoodCategory, (typeof EXCLUDED_CATEGORIES)[number]>;
+export type MealQuery = { text: string; categories: readonly FoodCategory[] };
 
-// 60 candidatos. `satisfies` obliga a asignar cuota a cada categoría nueva
-// que no esté excluida.
-export const CATEGORY_QUOTAS = {
-  meats: 7,
-  fish_seafood: 5,
-  eggs: 3,
-  dairy: 6,
-  legumes: 6,
-  cereals: 9,
-  tubers_roots: 4,
-  vegetables: 10,
-  fruits: 6,
-  nuts_seeds: 2,
-  fats_oils: 2,
-} as const satisfies Record<MealCategory, number>;
+const PROTEIN_SOURCES = ['meats', 'fish_seafood', 'eggs', 'legumes'] as const;
+const CARB_SOURCES = ['cereals', 'tubers_roots'] as const;
+const HEALTHY_FATS = ['fats_oils', 'nuts_seeds', 'fruits'] as const;
 
-// En estas categorías el alimento se sirve cocido: la versión cruda o seca
-// tiene otros nutrientes por 100 g (100 g de lentejas crudas no son 100 g
-// de lentejas en el plato). "Calor seco" es un método de cocción.
-const SERVED_COOKED = new Set<string>([
-  'meats',
-  'fish_seafood',
-  'eggs',
-  'legumes',
-  'cereals',
-  'tubers_roots',
-]);
-const UNCOOKED_NAME =
-  /\b(crud[oa]s?|sin cocinar|sin preparar)\b|(?<!calor )\bsec[oa]s?\b/;
+const snackQueries = (meal: string): MealQuery[] => [
+  { text: `fruta fresca para ${meal}`, categories: ['fruits'] },
+  { text: `yogur o queso para ${meal}`, categories: ['dairy'] },
+  { text: 'frutos secos o semillas como snack', categories: ['nuts_seeds'] },
+  { text: 'pan o galletas integrales como snack', categories: ['cereals'] },
+];
 
-// Ingredientes que no son un plato, y vísceras.
-const NOT_A_DISH_NAME =
-  /\b(harinas?|en polvo|deshidratad[oa]s?|liofilizad[oa]s?|higado|corazon|rinon(es)?|lengua|sesos|bazo|pancreas|pulmon(es)?|molleja|menudencias|piel|patas?|sebo)\b/;
+// Consultas híbridas por comida: el texto guía la búsqueda semántica y la de
+// texto; las categorías son filtro duro.
+export const MEAL_QUERIES: Record<MealSlot, readonly MealQuery[]> = {
+  desayuno: [
+    {
+      text: 'lácteos para el desayuno: leche, yogur o queso fresco',
+      categories: ['dairy'],
+    },
+    { text: 'fruta fresca para el desayuno', categories: ['fruits'] },
+    {
+      text: 'cereales para el desayuno: avena, pan integral o granola',
+      categories: ['cereals'],
+    },
+    { text: 'huevos para el desayuno', categories: ['eggs'] },
+  ],
+  media_manana: snackQueries('media mañana'),
+  almuerzo: [
+    {
+      text: 'proteína para el almuerzo: pollo, pescado, carne magra o legumbres',
+      categories: PROTEIN_SOURCES,
+    },
+    {
+      text: 'carbohidratos para el almuerzo: arroz, papa, pasta o quinua',
+      categories: CARB_SOURCES,
+    },
+    {
+      text: 'verduras cocidas o ensalada para el almuerzo',
+      categories: ['vegetables'],
+    },
+    {
+      text: 'grasa saludable para cocinar o aliñar: aceite de oliva, palta o frutos secos',
+      categories: HEALTHY_FATS,
+    },
+  ],
+  merienda: snackQueries('la merienda'),
+  cena: [
+    {
+      text: 'proteína ligera para la cena: pescado, pollo, huevos o tofu',
+      categories: PROTEIN_SOURCES,
+    },
+    {
+      text: 'carbohidratos para la cena: camote, arroz integral o pasta integral',
+      categories: CARB_SOURCES,
+    },
+    {
+      text: 'verduras para la cena: salteadas, al vapor o en sopa',
+      categories: ['vegetables'],
+    },
+    {
+      text: 'grasa saludable: aceite de oliva, palta o semillas',
+      categories: HEALTHY_FATS,
+    },
+  ],
+};
 
-function isEligible(food: CandidateFood): boolean {
-  if (food.isAlcoholic || !Object.hasOwn(CATEGORY_QUOTAS, food.category)) {
-    return false;
-  }
-  const name = normalizeText(food.name);
-  if (NOT_A_DISH_NAME.test(name)) return false;
-  return !(SERVED_COOKED.has(food.category) && UNCOOKED_NAME.test(name));
-}
+// Toda comida necesita al menos un alimento de cada grupo. Si sus consultas
+// no traen ninguno, se busca con `fallback`.
+export const COVERAGE_GROUPS = [
+  {
+    name: 'proteína',
+    categories: [...PROTEIN_SOURCES, 'dairy'],
+    fallback: 'fuente de proteína para una comida',
+  },
+  {
+    name: 'carbohidratos',
+    categories: CARB_SOURCES,
+    fallback: 'fuente de carbohidratos: cereal, pan o tubérculo',
+  },
+  {
+    name: 'verdura o fruta',
+    categories: ['vegetables', 'fruits'],
+    fallback: 'verdura o fruta fresca',
+  },
+] as const satisfies readonly {
+  name: string;
+  categories: readonly FoodCategory[];
+  fallback: string;
+}[];
 
-// Generador pseudoaleatorio mulberry32: la misma semilla da siempre la
-// misma secuencia, a diferencia de Math.random().
-function mulberry32(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+export type CoverageGroup = (typeof COVERAGE_GROUPS)[number];
 
-// Semilla a partir del request normalizado: el orden de las comidas
-// no cambia los candidatos.
-export function requestSeed(req: MenuRequest): number {
-  const canonical = JSON.stringify([
-    req.kcal,
-    req.macros.proteinPct,
-    req.macros.carbsPct,
-    req.macros.fatPct,
-    [...req.meals].sort(),
-    req.restrictions?.trim() ?? '',
-  ]);
-  return createHash('sha256').update(canonical).digest().readUInt32BE(0);
-}
+const belongsTo =
+  (group: CoverageGroup, categoryOf: ReadonlyMap<number, string>) =>
+  (id: number): boolean =>
+    (group.categories as readonly string[]).includes(categoryOf.get(id) ?? '');
 
-// Sin IA: filtra los elegibles y toma una muestra por categoría con un
-// barajado de Fisher-Yates sembrado. Ordenar por id antes de barajar hace
-// que el resultado no dependa del orden en que llegan de la base.
-export function selectCandidates(
-  foods: readonly CandidateFood[],
-  seed: number,
-): CandidateFood[] {
-  const random = mulberry32(seed);
-  const eligible = foods.filter(isEligible).sort((a, b) => a.id - b.id);
-
-  return Object.entries(CATEGORY_QUOTAS).flatMap(([category, quota]) => {
-    const pool = eligible.filter((food) => food.category === category);
-    const take = Math.min(quota, pool.length);
-    for (let i = 0; i < take; i++) {
-      const j = i + Math.floor(random() * (pool.length - i));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
+// Intercala los rankings (el 1.º de cada consulta, luego el 2.º...) para que
+// cada consulta aporte aunque otra tenga muchos resultados.
+export function interleave(rankings: readonly (readonly number[])[]): number[] {
+  const seen = new Set<number>();
+  const depth = Math.max(0, ...rankings.map((ranking) => ranking.length));
+  for (let position = 0; position < depth; position++) {
+    for (const ranking of rankings) {
+      const id = ranking[position];
+      if (id !== undefined) seen.add(id);
     }
-    return pool
-      .slice(0, take)
-      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  });
+  }
+  return [...seen];
+}
+
+export function missingGroups(
+  ids: readonly number[],
+  categoryOf: ReadonlyMap<number, string>,
+): CoverageGroup[] {
+  return COVERAGE_GROUPS.filter(
+    (group) => !ids.some(belongsTo(group, categoryOf)),
+  );
+}
+
+type PickInput = {
+  rankings: readonly (readonly number[])[];
+  // Resultados de la búsqueda de respaldo de cada grupo que faltaba
+  fallbacks?: ReadonlyMap<CoverageGroup['name'], readonly number[]>;
+  categoryOf: ReadonlyMap<number, string>;
+  size: number;
+};
+
+// Primero el mejor alimento de cada grupo (de las consultas o, si no hay,
+// del respaldo) y después el resto intercalado, hasta `size`.
+export function pickMealCandidates({
+  rankings,
+  fallbacks = new Map(),
+  categoryOf,
+  size,
+}: PickInput): number[] {
+  const pool = interleave(rankings);
+  const picked = new Set<number>();
+
+  for (const group of COVERAGE_GROUPS) {
+    const covers = belongsTo(group, categoryOf);
+    const best = pool.find(covers) ?? fallbacks.get(group.name)?.find(covers);
+    if (best !== undefined) picked.add(best);
+  }
+  for (const id of pool) {
+    if (picked.size >= size) break;
+    picked.add(id);
+  }
+  return [...picked];
 }

@@ -1,25 +1,37 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createGoogle } from '@ai-sdk/google';
 import type { Env } from '../config/env.js';
+import { EMBEDDING_MODEL, EmbeddingService } from './embedding.service.js';
+import { createEmbeddingModels, createLanguageModel } from './llm.providers.js';
 import { LANGUAGE_MODEL, LlmService } from './llm.service.js';
 
+const providerEnv = (config: ConfigService<Env, true>) => ({
+  GOOGLE_GENERATIVE_AI_API_KEY: config.get('GOOGLE_GENERATIVE_AI_API_KEY', {
+    infer: true,
+  }),
+  LLM_MODEL: config.get('LLM_MODEL', { infer: true }),
+  EMBEDDING_MODEL: config.get('EMBEDDING_MODEL', { infer: true }),
+});
+
+// Las fábricas leen la configuración validada y delegan en llm.providers,
+// el único lugar que conoce al proveedor.
 @Module({
   providers: [
-    // Único lugar que conoce al proveedor: cambiar a otro es cambiar
-    // esta fábrica.
     {
       provide: LANGUAGE_MODEL,
       inject: [ConfigService],
-      useFactory: (config: ConfigService<Env, true>) => {
-        const google = createGoogle({
-          apiKey: config.get('GOOGLE_GENERATIVE_AI_API_KEY', { infer: true }),
-        });
-        return google(config.get('LLM_MODEL', { infer: true }));
-      },
+      useFactory: (config: ConfigService<Env, true>) =>
+        createLanguageModel(providerEnv(config)),
+    },
+    {
+      provide: EMBEDDING_MODEL,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>) =>
+        createEmbeddingModels(providerEnv(config)),
     },
     LlmService,
+    EmbeddingService,
   ],
-  exports: [LlmService],
+  exports: [LlmService, EmbeddingService],
 })
 export class LlmModule {}

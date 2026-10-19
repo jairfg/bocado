@@ -1,105 +1,83 @@
-import { FoodCategorySchema, type MenuRequest } from '@bocado/shared';
 import {
-  CATEGORY_QUOTAS,
-  EXCLUDED_CATEGORIES,
-  requestSeed,
-  selectCandidates,
-  type CandidateFood,
+  interleave,
+  missingGroups,
+  pickMealCandidates,
 } from './candidate-selection.js';
 
-let nextId = 1;
-function food(
-  category: string,
-  name: string,
-  isAlcoholic = false,
-): CandidateFood {
-  return {
-    id: nextId++,
-    name,
-    category,
-    isAlcoholic,
-    kcalPer100g: 100,
-    proteinGPer100g: 5,
-    carbsGPer100g: 10,
-    fatGPer100g: 3,
-  };
-}
+// id → categoría de los alimentos de prueba
+const categoryOf = new Map<number, string>([
+  [1, 'dairy'],
+  [2, 'dairy'],
+  [3, 'fruits'],
+  [4, 'fruits'],
+  [5, 'cereals'],
+  [6, 'cereals'],
+  [7, 'eggs'],
+  [8, 'legumes'],
+  [9, 'nuts_seeds'],
+  [10, 'tubers_roots'],
+]);
 
-// `perCategory` alimentos válidos en cada una de las 14 categorías.
-function validFoods(perCategory: number): CandidateFood[] {
-  return FoodCategorySchema.options.flatMap((category) =>
-    Array.from({ length: perCategory }, (_, i) =>
-      food(category, `${category} ${i}, cocido`),
-    ),
-  );
-}
-
-const ids = (foods: CandidateFood[]) => foods.map((f) => f.id);
-
-describe('selectCandidates', () => {
-  const pool = validFoods(20);
-
-  it('elige 60 alimentos repartidos según las cuotas', () => {
-    const candidates = selectCandidates(pool, 42);
-
-    expect(candidates).toHaveLength(60);
-    for (const [category, quota] of Object.entries(CATEGORY_QUOTAS)) {
-      expect(candidates.filter((f) => f.category === category)).toHaveLength(
-        quota,
-      );
-    }
-  });
-
-  it('es determinista: misma semilla, mismos candidatos', () => {
-    const first = selectCandidates(pool, 42);
-
-    expect(ids(selectCandidates(pool, 42))).toEqual(ids(first));
-    // El orden en que llegan de la base no cambia el resultado
-    expect(ids(selectCandidates([...pool].reverse(), 42))).toEqual(ids(first));
-    expect(ids(selectCandidates(pool, 7))).not.toEqual(ids(first));
-  });
-
-  it('no incluye alcohol, categorías excluidas ni alimentos crudos', () => {
-    // Menos alimentos válidos que la cuota: todo lo elegible sale elegido,
-    // así que un alimento que no se filtre aparecería sí o sí.
-    const valid = validFoods(1);
-    const excluded = [
-      food('fruits', 'Cerezas en licor', true),
-      food('beverages', 'Vino tinto de mesa', true),
-      food('meats', 'Res, hígado, cocido'),
-      food('legumes', 'Lentejas crudas'),
-      food('cereals', 'Harina de trigo integral'),
-    ];
-
-    const candidates = selectCandidates([...valid, ...excluded], 42);
-
-    expect(candidates.some((f) => f.isAlcoholic)).toBe(false);
-    for (const id of ids(excluded)) {
-      expect(ids(candidates)).not.toContain(id);
-    }
-    for (const category of EXCLUDED_CATEGORIES) {
-      expect(candidates.some((f) => f.category === category)).toBe(false);
-    }
-    // Lo cocido a calor seco sí es válido
-    const baked = food('fish_seafood', 'Bacalao, cocido, calor seco');
-    expect(ids(selectCandidates([baked], 42))).toEqual([baked.id]);
+describe('interleave', () => {
+  it('toma el 1.º de cada consulta, luego el 2.º, sin duplicados', () => {
+    expect(
+      interleave([
+        [1, 2, 3],
+        [4, 1],
+        [5, 6, 7, 9],
+      ]),
+    ).toEqual([1, 4, 5, 2, 6, 3, 7, 9]);
   });
 });
 
-describe('requestSeed', () => {
-  const req: MenuRequest = {
-    kcal: 2000,
-    macros: { proteinPct: 30, carbsPct: 45, fatPct: 25 },
-    meals: ['desayuno', 'almuerzo', 'cena'],
-  };
+describe('pickMealCandidates', () => {
+  it('incluye proteína, carbohidrato y verdura o fruta aunque no estén arriba', () => {
+    // Con size 3, solo intercalando saldrían 1, 9 y 2 (sin fruta ni cereal)
+    const picked = pickMealCandidates({
+      rankings: [
+        [1, 2, 3],
+        [9, 5],
+      ],
+      categoryOf,
+      size: 3,
+    });
 
-  it('no depende del orden de las comidas', () => {
-    expect(
-      requestSeed({ ...req, meals: ['cena', 'desayuno', 'almuerzo'] }),
-    ).toBe(requestSeed(req));
+    expect(picked).toEqual([1, 5, 3]);
+    expect(missingGroups(picked, categoryOf)).toEqual([]);
   });
 
-  it('cambia si cambia el request', () => {
-    expect(requestSeed({ ...req, kcal: 2100 })).not.toBe(requestSeed(req));
+  it('completa un grupo faltante con el respaldo de su categoría', () => {
+    // Desayuno vegano: las consultas no traen ninguna proteína
+    const rankings = [[3, 4], [5, 6], [9]];
+    expect(
+      missingGroups(rankings.flat(), categoryOf).map((g) => g.name),
+    ).toEqual(['proteína']);
+
+    const picked = pickMealCandidates({
+      rankings,
+      fallbacks: new Map([['proteína', [9, 8]]]),
+      categoryOf,
+      size: 4,
+    });
+
+    // 9 (frutos secos) no cuenta como proteína: se usa 8 (legumbres).
+    // El cuarto lugar se llena con el intercalado (3, 5, 9...).
+    expect(picked).toEqual([8, 5, 3, 9]);
+    expect(missingGroups(picked, categoryOf)).toEqual([]);
+  });
+
+  it('no supera el tamaño ni repite alimentos', () => {
+    const picked = pickMealCandidates({
+      rankings: [
+        [1, 3, 5, 7],
+        [1, 3, 5, 7],
+        [2, 4, 6, 8],
+      ],
+      categoryOf,
+      size: 5,
+    });
+
+    expect(picked).toHaveLength(5);
+    expect(new Set(picked).size).toBe(5);
   });
 });

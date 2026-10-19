@@ -18,7 +18,6 @@ const candidates: CandidateFood[] = [
     id: 7,
     name: 'Avena, cocida con agua',
     category: 'cereals',
-    isAlcoholic: false,
     kcalPer100g: 71,
     proteinGPer100g: 2.5,
     carbsGPer100g: 12,
@@ -35,6 +34,18 @@ describe('buildMenuPrompt', () => {
       '7 | Avena, cocida con agua | cereals | 71, 2.5, 12, 1.5',
     );
     expect(prompt).not.toContain('<restricciones_usuario>');
+  });
+
+  it('lista los candidatos sugeridos por comida', () => {
+    const prompt = buildMenuPrompt({
+      meals,
+      candidates,
+      suggestions: [{ slot: 'desayuno', foodIds: [7, 12] }],
+    });
+
+    expect(prompt).toContain(
+      'Candidatos sugeridos por comida (ids):\n- desayuno: 7, 12',
+    );
   });
 
   it('delimita las restricciones y no deja cerrar la etiqueta', () => {

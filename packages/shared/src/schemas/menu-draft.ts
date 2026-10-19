@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MealSlotSchema } from './menu-request.js';
+import { RestrictionFiltersSchema } from './restriction-filters.js';
 
 export const NutrientsSchema = z.object({
   kcal: z.number(),
@@ -49,6 +50,13 @@ export const MenuDraftSchema = z.object({
   meals: z.array(MenuDraftMealSchema),
   totals: NutrientsSchema,
   warnings: z.array(MenuDraftWarningSchema),
+  // Para explicar el menú: cómo se interpretaron las restricciones y qué
+  // alimentos se le ofrecieron al modelo en cada comida.
+  restrictionFilters: RestrictionFiltersSchema,
+  candidates: z.array(
+    z.object({ slot: MealSlotSchema, foodIds: z.array(z.int()) }),
+  ),
+  // Suma de las llamadas al LLM (interpretar restricciones y armar el menú)
   usage: z.object({
     // null = el proveedor no reportó el valor
     inputTokens: z.int().nullable(),

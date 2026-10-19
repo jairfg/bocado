@@ -4,16 +4,15 @@ import {
   Inject,
   Injectable,
   Logger,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
-  APICallError,
   generateText,
   NoObjectGeneratedError,
   Output,
   type LanguageModel,
 } from 'ai';
 import type { z } from 'zod';
+import { providerHttpException } from './provider-errors.js';
 
 // Token de inyección: el modelo concreto lo arma LlmModule desde la
 // configuración y los tests lo reemplazan por un modelo simulado.
@@ -84,16 +83,6 @@ export class LlmService {
         'El modelo devolvió una respuesta que no cumple el formato esperado',
       );
     }
-
-    if (APICallError.isInstance(error) && error.statusCode === 429) {
-      this.logger.warn('El proveedor de IA respondió 429 (límite de cuota)');
-      return new ServiceUnavailableException(
-        'El proveedor de IA alcanzó su límite de solicitudes, intenta más tarde',
-      );
-    }
-
-    const detail = error instanceof Error ? error.message : String(error);
-    this.logger.error(`Error del proveedor de IA: ${detail}`);
-    return new BadGatewayException('No se pudo obtener respuesta del modelo');
+    return providerHttpException(error, this.logger);
   }
 }

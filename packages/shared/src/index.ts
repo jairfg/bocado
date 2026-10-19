@@ -12,6 +12,15 @@ export {
 } from './schemas/food.js';
 export { FoodQuerySchema, type FoodQuery } from './schemas/food-query.js';
 export {
+  FoodSearchQuerySchema,
+  type FoodSearchQuery,
+} from './schemas/food-search-query.js';
+export {
+  NO_RESTRICTIONS,
+  RestrictionFiltersSchema,
+  type RestrictionFilters,
+} from './schemas/restriction-filters.js';
+export {
   MealTargetSchema,
   MenuDistributionSchema,
   type MealTarget,

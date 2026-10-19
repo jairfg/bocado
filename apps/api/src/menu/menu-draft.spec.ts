@@ -2,14 +2,20 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   MenuDraftSchema,
+  NO_RESTRICTIONS,
   type LlmMenu,
+  type MealSlot,
   type MenuDraft,
   type MenuRequest,
+  type RestrictionFilters,
 } from '@bocado/shared';
 import { MockLanguageModelV4 } from 'ai/test';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
+import { EMBEDDING_MODEL } from '../llm/embedding.service.js';
 import { LANGUAGE_MODEL } from '../llm/llm.service.js';
+import { PrismaModule } from '../prisma/prisma.module.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import type { CandidateFood } from './candidate-selection.js';
 import { CandidatesService } from './candidates.service.js';
 import { MenuModule } from './menu.module.js';
@@ -24,7 +30,6 @@ function food(
     id,
     name,
     category,
-    isAlcoholic: false,
     kcalPer100g: kcal,
     proteinGPer100g: protein,
     carbsGPer100g: carbs,
@@ -49,10 +54,11 @@ const REQUEST: MenuRequest = {
   meals: ['desayuno', 'almuerzo', 'cena'],
 };
 
-function mockModel(text: string): MockLanguageModelV4 {
+// Una respuesta por llamada, en orden
+function mockModel(texts: readonly string[]): MockLanguageModelV4 {
   return new MockLanguageModelV4({
-    doGenerate: {
-      content: [{ type: 'text', text }],
+    doGenerate: texts.map((text) => ({
+      content: [{ type: 'text' as const, text }],
       finishReason: { unified: 'stop', raw: undefined },
       usage: {
         inputTokens: {
@@ -64,31 +70,58 @@ function mockModel(text: string): MockLanguageModelV4 {
         outputTokens: { total: 150, text: 150, reasoning: undefined },
       },
       warnings: [],
-    },
+    })),
   });
 }
 
 describe('POST /menu/draft', () => {
   let app: INestApplication<App> | undefined;
+  let model: MockLanguageModelV4;
+  let candidateFilters: RestrictionFilters[];
 
   afterEach(async () => {
     await app?.close();
     app = undefined;
   });
 
-  // El módulo real, con el modelo simulado y candidatos fijos en lugar de
-  // la base: no hay llamadas a Gemini ni a Postgres.
-  async function postDraft(modelOutput: string) {
-    const moduleRef = await Test.createTestingModule({ imports: [MenuModule] })
+  // El módulo real, con el LLM simulado y candidatos fijos en lugar de la
+  // búsqueda: no hay llamadas a Gemini ni a Postgres.
+  async function postDraft(
+    modelOutputs: string | readonly string[],
+    body: MenuRequest = REQUEST,
+  ) {
+    model = mockModel(
+      typeof modelOutputs === 'string' ? [modelOutputs] : modelOutputs,
+    );
+    candidateFilters = [];
+    const moduleRef = await Test.createTestingModule({
+      imports: [PrismaModule, MenuModule],
+    })
+      .overrideProvider(PrismaService)
+      .useValue({})
       .overrideProvider(LANGUAGE_MODEL)
-      .useValue(mockModel(modelOutput))
+      .useValue(model)
+      // No se usa: CandidatesService, que haría la búsqueda, está simulado
+      .overrideProvider(EMBEDDING_MODEL)
+      .useValue({})
       .overrideProvider(CandidatesService)
-      .useValue({ forRequest: () => Promise.resolve(CANDIDATES) })
+      .useValue({
+        forMeals: (slots: MealSlot[], filters: RestrictionFilters) => {
+          candidateFilters.push(filters);
+          return Promise.resolve({
+            foods: CANDIDATES,
+            bySlot: slots.map((slot) => ({
+              slot,
+              foodIds: CANDIDATES.map((f) => f.id),
+            })),
+          });
+        },
+      })
       .compile();
     app = moduleRef.createNestApplication({ logger: false });
     await app.init();
 
-    return request(app.getHttpServer()).post('/menu/draft').send(REQUEST);
+    return request(app.getHttpServer()).post('/menu/draft').send(body);
   }
 
   function sumOf(rows: { kcal: number; proteinG: number }[]) {
@@ -173,6 +206,38 @@ describe('POST /menu/draft', () => {
       outputTokens: 150,
       latencyMs: expect.any(Number),
     });
+    // Sin restricciones no se llama al LLM para interpretarlas
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(draft.restrictionFilters).toEqual(NO_RESTRICTIONS);
+    expect(draft.candidates.map((meal) => meal.slot)).toEqual(REQUEST.meals);
+  });
+
+  it('interpreta las restricciones y usa los filtros para los candidatos', async () => {
+    const filters: RestrictionFilters = {
+      ...NO_RESTRICTIONS,
+      vegetarian: true,
+      excludeTerms: ['brócoli'],
+    };
+    const llmMenu: LlmMenu = {
+      meals: [
+        { slot: 'desayuno', items: [{ foodId: 10, grams: 100 }] },
+        { slot: 'almuerzo', items: [{ foodId: 50, grams: 200 }] },
+        { slot: 'cena', items: [{ foodId: 20, grams: 100 }] },
+      ],
+    };
+
+    const res = await postDraft(
+      [JSON.stringify(filters), JSON.stringify(llmMenu)],
+      { ...REQUEST, restrictions: 'vegetariano, no me gusta el brócoli' },
+    );
+
+    expect(res.status).toBe(200);
+    const draft = MenuDraftSchema.parse(res.body);
+    expect(candidateFilters).toEqual([filters]);
+    expect(draft.restrictionFilters).toEqual(filters);
+    // Dos llamadas: interpretar restricciones y armar el menú
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(draft.usage).toMatchObject({ inputTokens: 2400, outputTokens: 300 });
   });
 
   it('descarta un foodId que no está entre los candidatos', async () => {

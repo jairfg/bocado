@@ -7,17 +7,37 @@ import type {
   MenuDraftMeal,
   MenuDraftWarning,
   Nutrients,
+  RestrictionFilters,
 } from '@bocado/shared';
 import type { CandidateFood } from './candidate-selection.js';
 
 type LlmItem = LlmMenu['meals'][number]['items'][number];
 
+type Usage = MenuDraft['usage'];
+
 export type DraftInput = {
   distribution: MenuDistribution;
   candidates: readonly CandidateFood[];
+  candidatesBySlot: MenuDraft['candidates'];
+  restrictionFilters: RestrictionFilters;
   llmMenu: LlmMenu;
-  usage: MenuDraft['usage'];
+  usage: Usage;
 };
+
+// Suma el uso de varias llamadas al LLM. Si una no reportó tokens, el total
+// tampoco se conoce (null), igual que con los nutrientes no medidos.
+export function sumUsage(...calls: readonly (Usage | null)[]): Usage {
+  const made = calls.filter((call): call is Usage => call !== null);
+  const total = (key: 'inputTokens' | 'outputTokens') =>
+    made.some((call) => call[key] === null)
+      ? null
+      : made.reduce((sum, call) => sum + (call[key] ?? 0), 0);
+  return {
+    inputTokens: total('inputTokens'),
+    outputTokens: total('outputTokens'),
+    latencyMs: made.reduce((sum, call) => sum + call.latencyMs, 0),
+  };
+}
 
 const round1 = (value: number): number => Math.round(value * 10) / 10;
 
@@ -55,6 +75,8 @@ const deviationPct = (totals: Nutrients, target: Nutrients): Nutrients =>
 export function buildMenuDraft({
   distribution,
   candidates,
+  candidatesBySlot,
+  restrictionFilters,
   llmMenu,
   usage,
 }: DraftInput): MenuDraft {
@@ -131,6 +153,8 @@ export function buildMenuDraft({
     meals,
     totals: sumNutrients(meals.map((meal) => meal.totals)),
     warnings,
+    restrictionFilters,
+    candidates: candidatesBySlot,
     usage,
   };
 }

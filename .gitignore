@@ -5,3 +5,5 @@ dist/
 coverage/
 *.tsbuildinfo
 apps/api/src/generated/
+# Contador local de cuota diaria de embeddings (scripts/quota-ledger.ts)
+apps/api/.embedding-quota.json
