@@ -4,6 +4,8 @@ export type CandidateFood = {
   id: number;
   name: string;
   category: string;
+  // Porción de referencia: define los límites de gramos (portion-limits)
+  servingSizeG: number | null;
   kcalPer100g: number;
   proteinGPer100g: number;
   carbsGPer100g: number;

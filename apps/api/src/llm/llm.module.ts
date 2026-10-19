@@ -11,6 +11,7 @@ const providerEnv = (config: ConfigService<Env, true>) => ({
   }),
   LLM_MODEL: config.get('LLM_MODEL', { infer: true }),
   EMBEDDING_MODEL: config.get('EMBEDDING_MODEL', { infer: true }),
+  LLM_THINKING_LEVEL: config.get('LLM_THINKING_LEVEL', { infer: true }),
 });
 
 // Las fábricas leen la configuración validada y delegan en llm.providers,

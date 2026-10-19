@@ -1,7 +1,13 @@
-import { createGoogle, type GoogleEmbeddingModelOptions } from '@ai-sdk/google';
+import {
+  createGoogle,
+  type GoogleEmbeddingModelOptions,
+  type GoogleLanguageModelOptions,
+} from '@ai-sdk/google';
 import {
   defaultEmbeddingSettingsMiddleware,
+  defaultSettingsMiddleware,
   wrapEmbeddingModel,
+  wrapLanguageModel,
   type EmbeddingModel,
   type LanguageModel,
 } from 'ai';
@@ -18,7 +24,10 @@ export const EMBEDDING_DIMENSIONS = 768;
 
 type ProviderEnv = Pick<
   Env,
-  'GOOGLE_GENERATIVE_AI_API_KEY' | 'LLM_MODEL' | 'EMBEDDING_MODEL'
+  | 'GOOGLE_GENERATIVE_AI_API_KEY'
+  | 'LLM_MODEL'
+  | 'EMBEDDING_MODEL'
+  | 'LLM_THINKING_LEVEL'
 >;
 
 // Dos vistas del mismo modelo: Gemini optimiza distinto el texto que se
@@ -29,9 +38,23 @@ export type EmbeddingModels = {
   query: EmbeddingModel;
 };
 
+// Gemini 3 controla el razonamiento con thinkingConfig.thinkingLevel (la
+// documentación del proveedor reserva thinkingBudget para Gemini 2.5). Se
+// fija aquí como ajuste por defecto para no repetirlo en cada llamada.
 export function createLanguageModel(env: ProviderEnv): LanguageModel {
   const google = createGoogle({ apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY });
-  return google(env.LLM_MODEL);
+  return wrapLanguageModel({
+    model: google(env.LLM_MODEL),
+    middleware: defaultSettingsMiddleware({
+      settings: {
+        providerOptions: {
+          google: {
+            thinkingConfig: { thinkingLevel: env.LLM_THINKING_LEVEL },
+          } satisfies GoogleLanguageModelOptions,
+        },
+      },
+    }),
+  });
 }
 
 export function createEmbeddingModels(env: ProviderEnv): EmbeddingModels {

@@ -18,6 +18,7 @@ const candidates: CandidateFood[] = [
     id: 7,
     name: 'Avena, cocida con agua',
     category: 'cereals',
+    servingSizeG: 234,
     kcalPer100g: 71,
     proteinGPer100g: 2.5,
     carbsGPer100g: 12,
@@ -30,8 +31,9 @@ describe('buildMenuPrompt', () => {
     const prompt = buildMenuPrompt({ meals, candidates });
 
     expect(prompt).toContain('- desayuno: 500 kcal, P 30 g, C 50 g, G 20 g');
+    // Con la porción mínima y máxima que respeta el optimizador
     expect(prompt).toContain(
-      '7 | Avena, cocida con agua | cereals | 71, 2.5, 12, 1.5',
+      '7 | Avena, cocida con agua | cereals | 71, 2.5, 12, 1.5 | 30–350',
     );
     expect(prompt).not.toContain('<restricciones_usuario>');
   });

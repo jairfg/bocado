@@ -28,14 +28,22 @@ export {
 } from './schemas/menu-distribution.js';
 export { LlmMenuSchema, type LlmMenu } from './schemas/llm-menu.js';
 export {
+  LlmMealRevisionSchema,
+  type LlmMealRevision,
+} from './schemas/llm-meal-revision.js';
+export {
+  MealStatusSchema,
   MenuDraftItemSchema,
   MenuDraftMealSchema,
   MenuDraftSchema,
   MenuDraftWarningSchema,
   NutrientsSchema,
+  StageLatencySchema,
+  type MealStatus,
   type MenuDraft,
   type MenuDraftItem,
   type MenuDraftMeal,
   type MenuDraftWarning,
   type Nutrients,
+  type StageLatency,
 } from './schemas/menu-draft.js';

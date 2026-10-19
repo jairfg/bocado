@@ -4,7 +4,11 @@ import {
   FoodSearchService,
   type SearchRequest,
 } from '../foods/food-search.service.js';
-import type { SearchFilters } from '../foods/search-filters.js';
+import {
+  buildSearchWhere,
+  type SearchFilters,
+} from '../foods/search-filters.js';
+import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   MAX_CANDIDATES,
@@ -127,6 +131,22 @@ export class CandidatesService {
     return new Map(groups.map((group, i) => [group.name, results[i]]));
   }
 
+  // Los alimentos de `ids` que existen y cumplen los mismos filtros duros
+  // que la búsqueda de candidatos, en el orden de `ids`. Valida lo que el
+  // LLM propone en las revisiones.
+  async loadEligible(
+    ids: readonly number[],
+    restrictions: RestrictionFilters,
+  ): Promise<CandidateFood[]> {
+    if (ids.length === 0) return [];
+    const where = buildSearchWhere({ restrictions, dishesOnly: true });
+    const rows = await this.prisma.$queryRaw<{ id: number }[]>`
+      SELECT id FROM foods WHERE id IN (${Prisma.join([...ids])}) AND ${where}
+    `;
+    const foods = await this.load(rows.map((row) => row.id));
+    return [...new Set(ids)].flatMap((id) => foods.get(id) ?? []);
+  }
+
   private async load(
     ids: readonly number[],
   ): Promise<Map<number, CandidateFood>> {
@@ -136,6 +156,7 @@ export class CandidatesService {
         id: true,
         name: true,
         category: true,
+        servingSizeG: true,
         kcalPer100g: true,
         proteinGPer100g: true,
         carbsGPer100g: true,

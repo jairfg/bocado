@@ -3,11 +3,10 @@ import {
   FoodCategorySchema,
   NO_RESTRICTIONS,
   RestrictionFiltersSchema,
-  type MenuDraft,
   type RestrictionFilters,
 } from '@bocado/shared';
 import { CATEGORY_LABELS } from '../foods/embedding-text.js';
-import { LlmService } from '../llm/llm.service.js';
+import { LlmService, type LlmCallUsage } from '../llm/llm.service.js';
 import { delimitRestrictions, RESTRICTIONS_TAG } from '../llm/user-data.js';
 
 const CATEGORY_LIST = FoodCategorySchema.options
@@ -30,7 +29,7 @@ Reglas:
 export type InterpretedRestrictions = {
   filters: RestrictionFilters;
   // null si no hubo llamada al LLM
-  usage: MenuDraft['usage'] | null;
+  usage: LlmCallUsage | null;
 };
 
 @Injectable()

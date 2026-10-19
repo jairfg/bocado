@@ -7,6 +7,12 @@ const EnvSchema = z.object({
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1),
   LLM_MODEL: z.string().min(1),
   EMBEDDING_MODEL: z.string().min(1),
+  // Cuánto razona el modelo antes de responder. El código hace la
+  // aritmética, así que basta con poco. Vacía cuenta como no definida.
+  LLM_THINKING_LEVEL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.enum(['minimal', 'low', 'medium', 'high']).default('low'),
+  ),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
