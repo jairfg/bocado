@@ -37,8 +37,10 @@ export class FoodSearchService {
   // Todas las consultas se embeben en una sola solicitud.
   async searchMany(
     requests: readonly SearchRequest[],
-    mode: SearchMode = 'hybrid',
+    requested: SearchMode = 'hybrid',
   ): Promise<number[][]> {
+    // Sin modelo de embeddings (LLM_PROVIDER=mock) queda solo el texto
+    const mode = this.embeddings.available ? requested : 'text';
     const vectors =
       mode === 'text'
         ? []

@@ -18,5 +18,6 @@ import { RestrictionsService } from './restrictions.service.js';
     MenuDraftService,
   ],
   controllers: [MenuController],
+  exports: [MenuDraftService],
 })
 export class MenuModule {}

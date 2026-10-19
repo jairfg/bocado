@@ -47,3 +47,17 @@ export {
   type Nutrients,
   type StageLatency,
 } from './schemas/menu-draft.js';
+export {
+  DraftCreatedSchema,
+  DraftFailureSchema,
+  DraftProgressSchema,
+  DraftStatusSchema,
+  MenuDraftJobSchema,
+  type DraftCreated,
+  type DraftFailure,
+  type DraftFailureCode,
+  type DraftProgress,
+  type DraftStage,
+  type DraftStatus,
+  type MenuDraftJob,
+} from './schemas/draft-job.js';

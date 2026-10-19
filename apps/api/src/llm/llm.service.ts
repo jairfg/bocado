@@ -1,10 +1,4 @@
-import {
-  BadGatewayException,
-  HttpException,
-  Inject,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   generateText,
   isStepCount,
@@ -14,7 +8,16 @@ import {
   type ToolSet,
 } from 'ai';
 import type { z } from 'zod';
-import { providerHttpException } from './provider-errors.js';
+import { currentRun } from '../common/run-context.js';
+import {
+  InvalidModelOutputException,
+  providerHttpException,
+} from './provider-errors.js';
+import {
+  LLM_RATE_LIMITER,
+  SlidingWindowLimiter,
+  UNLIMITED,
+} from './rate-limiter.js';
 
 // Token de inyección: el modelo concreto lo arma LlmModule desde la
 // configuración y los tests lo reemplazan por un modelo simulado.
@@ -71,7 +74,13 @@ export type ToolLoopResult = {
 export class LlmService {
   private readonly logger = new Logger(LlmService.name);
 
-  constructor(@Inject(LANGUAGE_MODEL) private readonly model: LanguageModel) {}
+  constructor(
+    @Inject(LANGUAGE_MODEL) private readonly model: LanguageModel,
+    // Cada llamada al proveedor espera su turno: en vez de recibir un 429,
+    // espera a que haya lugar en la ventana de LLM_RPM
+    @Inject(LLM_RATE_LIMITER)
+    private readonly limiter: SlidingWindowLimiter = UNLIMITED,
+  ) {}
 
   async generateStructured<T>({
     instructions,
@@ -80,12 +89,14 @@ export class LlmService {
     temperature,
   }: StructuredRequest<T>): Promise<StructuredResult<T>> {
     const start = performance.now();
+    await this.limiter.acquire();
     try {
       const result = await generateText({
         model: this.model,
         instructions,
         prompt,
         temperature,
+        abortSignal: currentRun().signal,
         // El SDK valida la respuesta con el esquema y lanza
         // NoObjectGeneratedError si no lo cumple.
         output: Output.object({ schema }),
@@ -104,7 +115,7 @@ export class LlmService {
         latencyMs: Math.round(performance.now() - start),
       };
     } catch (error) {
-      throw this.toHttpException(error);
+      throw this.toError(error);
     }
   }
 
@@ -132,9 +143,12 @@ export class LlmService {
         tools,
         temperature,
         maxRetries: 0,
+        abortSignal: currentRun().signal,
         stopWhen: isStepCount(maxSteps),
-        prepareStep: ({ stepNumber }) => {
+        // Antes de cada paso (cada uno es una llamada): presupuesto y ritmo
+        prepareStep: async ({ stepNumber }) => {
           onStep?.();
+          await this.limiter.acquire();
           // En el último paso permitido solo puede responder: el bucle
           // nunca se corta a mitad de una búsqueda.
           if (stepNumber < maxSteps - 1) return {};
@@ -159,20 +173,22 @@ export class LlmService {
         latencyMs: Math.round(performance.now() - start),
       };
     } catch (error) {
-      throw providerHttpException(error, this.logger);
+      throw this.toError(error);
     }
   }
 
   // El detalle del proveedor queda en el log; el cliente recibe un mensaje
   // genérico sin datos internos.
-  private toHttpException(error: unknown): HttpException {
+  private toError(error: unknown): unknown {
+    // Cancelado por el tiempo máximo del job: no es culpa del proveedor y
+    // no debe confundirse con una falla que la revisión pueda absorber
+    const { signal } = currentRun();
+    if (signal?.aborted) return signal.reason;
     if (NoObjectGeneratedError.isInstance(error)) {
       this.logger.warn(
         `Salida del modelo fuera del esquema: ${String(error.cause)}`,
       );
-      return new BadGatewayException(
-        'El modelo devolvió una respuesta que no cumple el formato esperado',
-      );
+      return new InvalidModelOutputException();
     }
     return providerHttpException(error, this.logger);
   }

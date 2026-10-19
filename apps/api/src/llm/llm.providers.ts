@@ -12,6 +12,7 @@ import {
   type LanguageModel,
 } from 'ai';
 import type { Env } from '../config/env.js';
+import { createMockLanguageModel } from './mock-language-model.js';
 
 // Único archivo que conoce al proveedor. Lo usan las fábricas de LlmModule
 // y los scripts (que corren fuera de Nest): cambiar de proveedor es
@@ -24,11 +25,16 @@ export const EMBEDDING_DIMENSIONS = 768;
 
 type ProviderEnv = Pick<
   Env,
+  | 'LLM_PROVIDER'
   | 'GOOGLE_GENERATIVE_AI_API_KEY'
   | 'LLM_MODEL'
   | 'EMBEDDING_MODEL'
   | 'LLM_THINKING_LEVEL'
 >;
+
+// env.ts exige la key con LLM_PROVIDER=google
+const googleProvider = (env: ProviderEnv) =>
+  createGoogle({ apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY });
 
 // Dos vistas del mismo modelo: Gemini optimiza distinto el texto que se
 // guarda (documento) y el que se busca (consulta).
@@ -42,7 +48,8 @@ export type EmbeddingModels = {
 // documentación del proveedor reserva thinkingBudget para Gemini 2.5). Se
 // fija aquí como ajuste por defecto para no repetirlo en cada llamada.
 export function createLanguageModel(env: ProviderEnv): LanguageModel {
-  const google = createGoogle({ apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY });
+  if (env.LLM_PROVIDER === 'mock') return createMockLanguageModel();
+  const google = googleProvider(env);
   return wrapLanguageModel({
     model: google(env.LLM_MODEL),
     middleware: defaultSettingsMiddleware({
@@ -57,8 +64,13 @@ export function createLanguageModel(env: ProviderEnv): LanguageModel {
   });
 }
 
-export function createEmbeddingModels(env: ProviderEnv): EmbeddingModels {
-  const google = createGoogle({ apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY });
+// null con el proveedor simulado: sin embeddings, la búsqueda usa solo el
+// ranking de texto
+export function createEmbeddingModels(
+  env: ProviderEnv,
+): EmbeddingModels | null {
+  if (env.LLM_PROVIDER === 'mock') return null;
+  const google = googleProvider(env);
   const model = google.embedding(env.EMBEDDING_MODEL);
 
   const withTaskType = (

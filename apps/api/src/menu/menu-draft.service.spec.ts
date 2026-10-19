@@ -1,8 +1,8 @@
-import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   MenuDraftSchema,
   NO_RESTRICTIONS,
+  type DraftProgress,
   type LlmMenu,
   type MealSlot,
   type MenuDraft,
@@ -10,8 +10,6 @@ import {
   type RestrictionFilters,
 } from '@bocado/shared';
 import type { MockLanguageModelV4 } from 'ai/test';
-import request from 'supertest';
-import type { App } from 'supertest/types.js';
 import {
   ALL_FOODS,
   BROCCOLI,
@@ -28,11 +26,19 @@ import { mockModel, type MockStep } from '../../test/fixtures/mock-model.js';
 import { FoodSearchService } from '../foods/food-search.service.js';
 import { EMBEDDING_MODEL } from '../llm/embedding.service.js';
 import { LANGUAGE_MODEL } from '../llm/llm.service.js';
+import { InvalidModelOutputException } from '../llm/provider-errors.js';
+import {
+  EMBEDDING_RATE_LIMITER,
+  LLM_RATE_LIMITER,
+  SlidingWindowLimiter,
+  UNLIMITED,
+} from '../llm/rate-limiter.js';
 import { PrismaModule } from '../prisma/prisma.module.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { CandidateFood } from './candidate-selection.js';
 import { CandidatesService } from './candidates.service.js';
 import { optimizeMeal } from './meal-evaluation.js';
+import { MenuDraftService } from './menu-draft.service.js';
 import { MenuModule } from './menu.module.js';
 import { nutrientsFor } from './nutrition.js';
 import { portionLimits } from './portion-limits.js';
@@ -41,6 +47,10 @@ const REQUEST: MenuRequest = {
   kcal: 2000,
   macros: { proteinPct: 30, carbsPct: 45, fatPct: 25 },
   meals: ['desayuno', 'almuerzo', 'cena'],
+};
+const WITH_RESTRICTIONS: MenuRequest = {
+  ...REQUEST,
+  restrictions: 'vegetariano, no me gusta el brócoli',
 };
 
 const byId = new Map(ALL_FOODS.map((food) => [food.id, food]));
@@ -76,24 +86,52 @@ const FEASIBLE: Plan = {
   ],
 };
 
+// Desayuno sin proteína (avena y fresas) y los pasos con que el modelo lo
+// corrige: buscar, evaluar con yogur y huevo, entregar
+const WITHOUT_PROTEIN: Plan = {
+  ...FEASIBLE,
+  desayuno: [
+    [OATS, 250],
+    [STRAWBERRIES, 140],
+  ],
+};
+const revisedFoods = [OATS, STRAWBERRIES, GREEK_YOGURT, EGG];
+const REVISION_STEPS: MockStep[] = [
+  { tool: 'searchFoods', input: { query: 'yogur griego o huevo' } },
+  {
+    tool: 'evaluateMeal',
+    input: { items: revisedFoods.map((food) => ({ foodId: food.id })) },
+  },
+  {
+    tool: 'submitMeal',
+    input: {
+      items: optimizeMeal(
+        revisedFoods,
+        [250, 140, 170, 100],
+        TARGETS.desayuno,
+      ).evaluation.items.map(({ foodId, grams }) => ({ foodId, grams })),
+    },
+  },
+];
+
+const FILTERS: RestrictionFilters = {
+  ...NO_RESTRICTIONS,
+  vegetarian: true,
+  excludeTerms: ['brócoli'],
+};
+
 const json = (value: unknown): MockStep => ({ text: JSON.stringify(value) });
 
-describe('POST /menu/draft', () => {
-  let app: INestApplication<App> | undefined;
+describe('MenuDraftService.generate', () => {
   let model: MockLanguageModelV4;
   let candidateFilters: RestrictionFilters[];
 
-  afterEach(async () => {
-    await app?.close();
-    app = undefined;
-  });
-
   // El módulo real, con el LLM simulado, candidatos fijos y una búsqueda
-  // simulada para las revisiones: no hay llamadas a Gemini ni a Postgres.
-  async function postDraft(
+  // simulada para las revisiones: sin Gemini, Postgres ni Redis
+  async function setup(
     steps: readonly MockStep[],
-    body: MenuRequest = REQUEST,
-  ) {
+    llmLimiter: SlidingWindowLimiter = UNLIMITED,
+  ): Promise<MenuDraftService> {
     model = mockModel(steps);
     candidateFilters = [];
     const moduleRef = await Test.createTestingModule({
@@ -104,7 +142,11 @@ describe('POST /menu/draft', () => {
       .overrideProvider(LANGUAGE_MODEL)
       .useValue(model)
       .overrideProvider(EMBEDDING_MODEL)
-      .useValue({})
+      .useValue(null)
+      .overrideProvider(LLM_RATE_LIMITER)
+      .useValue(llmLimiter)
+      .overrideProvider(EMBEDDING_RATE_LIMITER)
+      .useValue(UNLIMITED)
       .overrideProvider(FoodSearchService)
       .useValue({
         searchMany: () => Promise.resolve([[GREEK_YOGURT.id, EGG.id]]),
@@ -125,26 +167,102 @@ describe('POST /menu/draft', () => {
           Promise.resolve(ids.flatMap((id) => byId.get(id) ?? [])),
       })
       .compile();
-    app = moduleRef.createNestApplication({ logger: false });
-    await app.init();
+    return moduleRef.get(MenuDraftService);
+  }
 
-    const res = await request(app.getHttpServer())
-      .post('/menu/draft')
-      .send(body);
-    return {
-      res,
-      draft: res.status === 200 ? MenuDraftSchema.parse(res.body) : null,
-    };
+  async function generate(
+    service: MenuDraftService,
+    request: MenuRequest = REQUEST,
+  ) {
+    const events: DraftProgress[] = [];
+    const draft = MenuDraftSchema.parse(
+      await service.generate(request, (event) => events.push(event)),
+    );
+    return { draft, events, stages: events.map((event) => event.stage) };
   }
 
   const sum = (rows: { kcal: number }[]) =>
     rows.reduce((total, row) => total + row.kcal, 0);
 
-  it('el optimizador calcula los gramos y los totales cuadran', async () => {
-    const { res, draft } = await postDraft([json(toMenu(FEASIBLE))]);
+  it('emite las etapas en orden', async () => {
+    const service = await setup([json(toMenu(FEASIBLE))]);
 
-    expect(res.status).toBe(200);
-    const { meals, usage } = draft as MenuDraft;
+    const { stages, events } = await generate(service);
+
+    // Sin restricciones no hay etapa de interpretación
+    expect(stages).toEqual([
+      'selecting_candidates',
+      'choosing_foods',
+      'optimizing_portions',
+      'completed',
+    ]);
+    expect(events.every((event) => event.message.length > 0)).toBe(true);
+  });
+
+  it('con restricciones y una revisión emite todas las etapas', async () => {
+    const service = await setup([
+      json(FILTERS),
+      json(toMenu(WITHOUT_PROTEIN)),
+      ...REVISION_STEPS,
+    ]);
+
+    const { stages, events } = await generate(service, WITH_RESTRICTIONS);
+
+    expect(stages).toEqual([
+      'interpreting_restrictions',
+      'selecting_candidates',
+      'choosing_foods',
+      'optimizing_portions',
+      'revising_meal',
+      'completed',
+    ]);
+    expect(events[4]).toMatchObject({
+      stage: 'revising_meal',
+      slot: 'desayuno',
+      message: 'Corrigiendo el desayuno',
+    });
+  });
+
+  it('si el limitador frena una llamada, emite waiting_for_quota', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      // 1 llamada por minuto: la del menú espera a la de las restricciones
+      const service = await setup(
+        [json(FILTERS), json(toMenu(FEASIBLE))],
+        new SlidingWindowLimiter(1),
+      );
+      const events: DraftProgress[] = [];
+      const draft = service.generate(WITH_RESTRICTIONS, (event) =>
+        events.push(event),
+      );
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await draft;
+
+      expect(events.map((event) => event.stage)).toEqual([
+        'interpreting_restrictions',
+        'selecting_candidates',
+        'choosing_foods',
+        'waiting_for_quota',
+        'optimizing_portions',
+        'completed',
+      ]);
+      expect(events[3]).toEqual({
+        stage: 'waiting_for_quota',
+        seconds: 60,
+        message: 'Esperando la cuota del proveedor de IA (60 s)',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('el optimizador calcula los gramos y los totales cuadran', async () => {
+    const service = await setup([json(toMenu(FEASIBLE))]);
+
+    const { draft } = await generate(service);
+
+    const { meals, usage } = draft;
     for (const meal of meals) {
       expect(['ok', 'adjusted']).toContain(meal.status);
       expect(meal.revisions).toBe(0);
@@ -160,7 +278,7 @@ describe('POST /menu/draft', () => {
       }
       expect(meal.totals.kcal).toBeCloseTo(sum(meal.items), 5);
     }
-    expect(draft!.totals.kcal).toBeCloseTo(
+    expect(draft.totals.kcal).toBeCloseTo(
       sum(meals.map((meal) => meal.totals)),
       5,
     );
@@ -174,7 +292,7 @@ describe('POST /menu/draft', () => {
         .map((item) => item.foodId),
     );
     expect(
-      draft!.warnings.map((warning) => [warning.code, warning.foodId]),
+      draft.warnings.map((warning) => [warning.code, warning.foodId]),
     ).toEqual(atMax.map((foodId) => ['portion_at_max', foodId]));
 
     // Sin restricciones ni revisiones: una sola llamada al LLM
@@ -193,7 +311,7 @@ describe('POST /menu/draft', () => {
         total: expect.any(Number),
       },
     });
-    expect(draft!.restrictionFilters).toEqual(NO_RESTRICTIONS);
+    expect(draft.restrictionFilters).toEqual(NO_RESTRICTIONS);
   });
 
   it('una comida "ok" no dispara ninguna llamada extra al LLM', async () => {
@@ -212,48 +330,31 @@ describe('POST /menu/draft', () => {
         ];
       }),
     ) as Plan;
+    const service = await setup([json(toMenu(exact))]);
 
-    const { draft } = await postDraft([json(toMenu(exact))]);
+    const { draft } = await generate(service);
 
-    expect(draft!.meals.map((meal) => meal.status)).toEqual(['ok', 'ok', 'ok']);
+    expect(draft.meals.map((meal) => meal.status)).toEqual(['ok', 'ok', 'ok']);
     expect(model.doGenerateCalls).toHaveLength(1);
   });
 
   it('revisa con herramientas la comida que el optimizador no puede ajustar', async () => {
-    // Desayuno sin proteína: avena y fresas
-    const plan: Plan = {
-      ...FEASIBLE,
-      desayuno: [
-        [OATS, 250],
-        [STRAWBERRIES, 140],
-      ],
-    };
-    const revisedFoods = [OATS, STRAWBERRIES, GREEK_YOGURT, EGG];
-    const revisedGrams = optimizeMeal(
-      revisedFoods,
-      [250, 140, 170, 100],
-      TARGETS.desayuno,
-    ).evaluation.items.map(({ foodId, grams }) => ({ foodId, grams }));
-
-    const { draft } = await postDraft([
-      json(toMenu(plan)),
-      { tool: 'searchFoods', input: { query: 'yogur griego o huevo' } },
-      {
-        tool: 'evaluateMeal',
-        input: { items: revisedFoods.map((food) => ({ foodId: food.id })) },
-      },
-      { tool: 'submitMeal', input: { items: revisedGrams } },
+    const service = await setup([
+      json(toMenu(WITHOUT_PROTEIN)),
+      ...REVISION_STEPS,
     ]);
 
-    const breakfast = draft!.meals[0];
+    const { draft } = await generate(service);
+
+    const breakfast = draft.meals[0];
     expect(breakfast.status).toBe('ok');
     expect(breakfast.revisions).toBe(1);
-    expect(draft!.meals.slice(1).map((meal) => meal.revisions)).toEqual([0, 0]);
+    expect(draft.meals.slice(1).map((meal) => meal.revisions)).toEqual([0, 0]);
     expect(
-      draft!.warnings.filter((warning) => warning.code !== 'portion_at_max'),
+      draft.warnings.filter((warning) => warning.code !== 'portion_at_max'),
     ).toEqual([]);
     // Menú (1) + tres pasos de la revisión
-    expect(draft!.usage).toMatchObject({
+    expect(draft.usage).toMatchObject({
       llmCalls: 4,
       toolSteps: 2,
       inputTokens: 4000,
@@ -262,21 +363,14 @@ describe('POST /menu/draft', () => {
   });
 
   it('interpreta las restricciones y usa los filtros para los candidatos', async () => {
-    const filters: RestrictionFilters = {
-      ...NO_RESTRICTIONS,
-      vegetarian: true,
-      excludeTerms: ['brócoli'],
-    };
+    const service = await setup([json(FILTERS), json(toMenu(FEASIBLE))]);
 
-    const { draft } = await postDraft([json(filters), json(toMenu(FEASIBLE))], {
-      ...REQUEST,
-      restrictions: 'vegetariano, no me gusta el brócoli',
-    });
+    const { draft } = await generate(service, WITH_RESTRICTIONS);
 
-    expect(candidateFilters).toEqual([filters]);
-    expect(draft!.restrictionFilters).toEqual(filters);
+    expect(candidateFilters).toEqual([FILTERS]);
+    expect(draft.restrictionFilters).toEqual(FILTERS);
     // Dos llamadas: interpretar restricciones y armar el menú
-    expect(draft!.usage).toMatchObject({
+    expect(draft.usage).toMatchObject({
       llmCalls: 2,
       inputTokens: 2000,
       outputTokens: 200,
@@ -286,12 +380,13 @@ describe('POST /menu/draft', () => {
   it('descarta un foodId que no está entre los candidatos', async () => {
     const menu = toMenu(FEASIBLE);
     menu.meals[1].items.push({ foodId: 99999, grams: 100 });
+    const service = await setup([json(menu)]);
 
-    const { draft } = await postDraft([json(menu)]);
+    const { draft }: { draft: MenuDraft } = await generate(service);
 
-    const lunch = draft!.meals.find((meal) => meal.slot === 'almuerzo');
+    const lunch = draft.meals.find((meal) => meal.slot === 'almuerzo');
     expect(lunch?.items.map((item) => item.foodId)).not.toContain(99999);
-    expect(draft!.warnings).toContainEqual({
+    expect(draft.warnings).toContainEqual({
       code: 'unknown_food',
       slot: 'almuerzo',
       foodId: 99999,
@@ -307,15 +402,14 @@ describe('POST /menu/draft', () => {
       }),
     ],
     ['texto que no es JSON', 'Lo siento, no puedo armar ese menú.'],
-  ])('responde 502 si la salida no cumple el esquema (%s)', async (_, text) => {
-    const { res } = await postDraft([{ text }]);
+  ])(
+    'falla con InvalidModelOutputException si la salida no cumple el esquema (%s)',
+    async (_, text) => {
+      const service = await setup([{ text }]);
 
-    expect(res.status).toBe(502);
-    expect(res.body).toEqual({
-      statusCode: 502,
-      error: 'Bad Gateway',
-      message:
-        'El modelo devolvió una respuesta que no cumple el formato esperado',
-    });
-  });
+      await expect(service.generate(REQUEST)).rejects.toBeInstanceOf(
+        InvalidModelOutputException,
+      );
+    },
+  );
 });

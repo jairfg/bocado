@@ -1,7 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { embedMany, type EmbeddingModel } from 'ai';
+import { currentRun } from '../common/run-context.js';
 import { EMBEDDING_DIMENSIONS, type EmbeddingModels } from './llm.providers.js';
 import { providerHttpException } from './provider-errors.js';
+import {
+  EMBEDDING_RATE_LIMITER,
+  SlidingWindowLimiter,
+  UNLIMITED,
+} from './rate-limiter.js';
 
 export const EMBEDDING_MODEL = Symbol('EMBEDDING_MODEL');
 
@@ -19,21 +25,37 @@ export class EmbeddingService {
   private readonly logger = new Logger(EmbeddingService.name);
 
   constructor(
-    @Inject(EMBEDDING_MODEL) private readonly models: EmbeddingModels,
+    // null con LLM_PROVIDER=mock: no hay embeddings y la búsqueda usa solo
+    // el ranking de texto
+    @Inject(EMBEDDING_MODEL) private readonly models: EmbeddingModels | null,
+    // Cuenta textos, no solicitudes: así cuenta Google la cuota
+    @Inject(EMBEDDING_RATE_LIMITER)
+    private readonly limiter: SlidingWindowLimiter = UNLIMITED,
   ) {}
 
+  get available(): boolean {
+    return this.models !== null;
+  }
+
   get modelId(): string {
-    return this.models.modelId;
+    return this.requireModels().modelId;
   }
 
   // Textos que se guardan en la base (alimentos)
   embedDocuments(texts: readonly string[]): Promise<number[][]> {
-    return this.embed(this.models.document, texts);
+    return this.embed(this.requireModels().document, texts);
   }
 
   // Textos que se buscan
   embedQueries(texts: readonly string[]): Promise<number[][]> {
-    return this.embed(this.models.query, texts);
+    return this.embed(this.requireModels().query, texts);
+  }
+
+  private requireModels(): EmbeddingModels {
+    if (!this.models) {
+      throw new Error('No hay modelo de embeddings con LLM_PROVIDER=mock');
+    }
+    return this.models;
   }
 
   // Todos los textos van en una sola llamada a embedMany: Google acepta
@@ -44,6 +66,8 @@ export class EmbeddingService {
   ): Promise<number[][]> {
     if (values.length === 0) return [];
 
+    await this.limiter.acquire(values.length);
+    const { signal } = currentRun();
     let embeddings: number[][];
     try {
       ({ embeddings } = await embedMany({
@@ -52,8 +76,10 @@ export class EmbeddingService {
         // Igual que con el LLM: sin reintentos automáticos que gasten cuota
         maxRetries: 0,
         maxParallelCalls: 1,
+        abortSignal: signal,
       }));
     } catch (error) {
+      if (signal?.aborted) throw signal.reason;
       throw providerHttpException(error, this.logger);
     }
 

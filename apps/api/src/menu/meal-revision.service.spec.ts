@@ -73,6 +73,7 @@ describe('MealRevisionService', () => {
   beforeEach(() => {
     vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
   });
 
   it('una comida "needs_revision" termina en "ok" usando las herramientas', async () => {

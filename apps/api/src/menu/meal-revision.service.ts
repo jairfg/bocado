@@ -3,6 +3,7 @@ import {
   LlmMealRevisionSchema,
   type FoodCategory,
   type LlmMealRevision,
+  type MealSlot,
   type MenuDraftWarning,
   type RestrictionFilters,
 } from '@bocado/shared';
@@ -36,6 +37,8 @@ export type RevisionContext = {
   // Texto original, para el prompt (delimitado como dato del usuario)
   restrictionsText?: string;
   budget: LlmCallBudget;
+  // Avisa al empezar cada revisión (progreso "revising_meal")
+  onRevise?: (slot: MealSlot) => void;
 };
 
 export type RevisionOutcome = {
@@ -106,6 +109,7 @@ export class MealRevisionService {
         break;
       }
       revisions++;
+      context.onRevise?.(meal.slot);
       const outcome = await this.runRevision(best, revisions, context, tally);
       best = outcome.best;
       if (outcome.failure) {

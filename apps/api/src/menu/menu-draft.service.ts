@@ -5,9 +5,11 @@ import {
   type MenuRequest,
   type StageLatency,
 } from '@bocado/shared';
+import { withRunContext } from '../common/run-context.js';
 import { LlmService, type TokenUsage } from '../llm/llm.service.js';
 import { CandidatesService } from './candidates.service.js';
 import { DistributionService } from './distribution.service.js';
+import { progress, type ProgressCallback } from './draft-progress.js';
 import { LlmCallBudget } from './llm-call-budget.js';
 import { MealRevisionService } from './meal-revision.service.js';
 import { buildMenuDraft, planMeals } from './menu-draft.builder.js';
@@ -18,6 +20,11 @@ import { RestrictionsService } from './restrictions.service.js';
 const TEMPERATURE = 0.2;
 
 type Stage = Exclude<keyof StageLatency, 'total'>;
+
+export type GenerateOptions = {
+  // Cancela la generación (por ejemplo, el tiempo máximo del job)
+  signal?: AbortSignal;
+};
 
 // Suma tokens de varias llamadas. Si una no los reportó, el total tampoco
 // se conoce (null), igual que con los nutrientes no medidos.
@@ -43,8 +50,32 @@ export class MenuDraftService {
   ) {}
 
   // restricciones → candidatos → el LLM elige alimentos → optimizador →
-  // revisión con herramientas solo donde haga falta
-  async createDraft(req: MenuRequest): Promise<MenuDraft> {
+  // revisión con herramientas solo donde haga falta.
+  //
+  // No sabe de HTTP ni de colas: el worker lo llama con un callback que
+  // guarda el progreso en el job, y las evaluaciones pueden llamarlo
+  // directo.
+  generate(
+    req: MenuRequest,
+    onProgress: ProgressCallback = () => undefined,
+    { signal }: GenerateOptions = {},
+  ): Promise<MenuDraft> {
+    // El limitador de ritmo, en lo profundo de LlmService, avisa por aquí
+    // cuando una llamada tiene que esperar
+    return withRunContext(
+      {
+        signal,
+        onWait: (seconds) => onProgress(progress.waitingForQuota(seconds)),
+      },
+      () => this.run(req, onProgress, signal),
+    );
+  }
+
+  private async run(
+    req: MenuRequest,
+    onProgress: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<MenuDraft> {
     const started = performance.now();
     const latency: Record<Stage, number> = {
       restrictions: 0,
@@ -54,6 +85,7 @@ export class MenuDraftService {
       revision: 0,
     };
     const timed = async <T>(stage: Stage, run: () => T | Promise<T>) => {
+      signal?.throwIfAborted();
       const start = performance.now();
       try {
         return await run();
@@ -65,11 +97,15 @@ export class MenuDraftService {
     const distribution = this.distributionService.calculate(req);
 
     // Solo llama al LLM si hay restricciones
+    if (req.restrictions?.trim()) {
+      onProgress(progress.interpretingRestrictions());
+    }
     const restrictions = await timed('restrictions', () =>
       this.restrictionsService.interpret(req.restrictions),
     );
     if (restrictions.usage) budget.use();
 
+    onProgress(progress.selectingCandidates());
     const candidates = await timed('candidates', () =>
       this.candidatesService.forMeals(
         distribution.meals.map((meal) => meal.slot),
@@ -77,6 +113,7 @@ export class MenuDraftService {
       ),
     );
 
+    onProgress(progress.choosingFoods());
     budget.use();
     const menu = await timed('menu', () =>
       this.llmService.generateStructured({
@@ -92,6 +129,7 @@ export class MenuDraftService {
       }),
     );
 
+    onProgress(progress.optimizingPortions());
     const planned = await timed('optimizer', () =>
       planMeals({
         distribution,
@@ -105,10 +143,12 @@ export class MenuDraftService {
         restrictions: restrictions.filters,
         restrictionsText: req.restrictions,
         budget,
+        onRevise: (slot) => onProgress(progress.revisingMeal(slot)),
       }),
     );
+    signal?.throwIfAborted();
 
-    return buildMenuDraft({
+    const draft = buildMenuDraft({
       meals: revised.meals,
       warnings: [...planned.warnings, ...revised.warnings],
       restrictionFilters: restrictions.filters,
@@ -127,5 +167,7 @@ export class MenuDraftService {
         },
       },
     });
+    onProgress(progress.completed());
+    return draft;
   }
 }

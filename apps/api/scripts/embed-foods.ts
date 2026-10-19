@@ -95,7 +95,13 @@ const env = validateEnv(process.env);
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: env.DATABASE_URL }),
 });
-const embeddings = new EmbeddingService(createEmbeddingModels(env));
+const models = createEmbeddingModels(env);
+if (!models) {
+  throw new Error(
+    'Este script necesita embeddings reales: LLM_PROVIDER=google',
+  );
+}
+const embeddings = new EmbeddingService(models);
 
 const excluded = new Set<string>(EXCLUDED_CATEGORIES);
 const format = (n: number) => n.toLocaleString('es-PE');

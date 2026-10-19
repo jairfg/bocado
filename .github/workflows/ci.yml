@@ -8,6 +8,17 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # Redis para las pruebas de integración de la cola (BullMQ)
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
 
@@ -28,6 +39,12 @@ jobs:
       - run: npm run lint
 
       - run: npm test
+
+      # Cola, worker y SSE con Redis real y el modelo simulado; sin API keys
+      - name: Integration tests
+        run: npm run test:integration -w api
+        env:
+          REDIS_URL: redis://localhost:6379/1
 
       - name: Build API
         run: npm run build -w api

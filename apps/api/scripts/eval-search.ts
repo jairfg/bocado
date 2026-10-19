@@ -27,7 +27,13 @@ const env = validateEnv(process.env);
 // Fuera de Nest las dependencias se arman a mano (tsx no emite los
 // metadatos de tipos que usa la inyección de dependencias).
 const prisma = new PrismaService(new ConfigService<Env, true>(env));
-const embeddings = new EmbeddingService(createEmbeddingModels(env));
+const models = createEmbeddingModels(env);
+if (!models) {
+  throw new Error(
+    'Este script necesita embeddings reales: LLM_PROVIDER=google',
+  );
+}
+const embeddings = new EmbeddingService(models);
 const search = new FoodSearchService(prisma, embeddings);
 
 type Food = { id: number; name: string; category: string };
